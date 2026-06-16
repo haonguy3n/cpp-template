@@ -32,6 +32,7 @@ static const conf::CliApp& App() {
             cmd.options.push_back({"--bits",    "Key size: 2048 (default) or 4096", "BITS"});
             cmd.options.push_back({"--policy",  "full | sign-only | sign-decrypt",  "POLICY"});
             cmd.options.push_back({"--subject", "Subject DN for the CSR",           "DN"});
+            cmd.options.push_back({"--out",     "Write CSR PEM to file (default: stdout)", "FILE"});
             a.commands.push_back(cmd);
         }
         {
@@ -92,8 +93,9 @@ static size_t ReadFile(const char *path, uint8_t *buf, size_t capacity) {
 static int CmdProvision(Connection &conn, const conf::CliCommand &cmd,
                         int argc, char **argv) {
     RsaBits bits = RsaBits::k2048;
-    KeyPolicy policy = KeyPolicy::SignOnly;
+    KeyPolicy policy = KeyPolicy::Full;  // match se05x cpp_app: default policy is Full (deletable)
     const char *subject_dn = "CN=SE05x-Device";
+    const char *out_path = nullptr;
 
     conf::CmdlineOptionsIterator it(argc, argv, cmd);
     for (;;) {
@@ -111,14 +113,35 @@ static int CmdProvision(Connection &conn, const conf::CliCommand &cmd,
             else if (ov.value == "sign-decrypt") policy = KeyPolicy::SignDecrypt;
         } else if (ov.option == "--subject") {
             subject_dn = ov.value.data(); // argv-backed, null-terminated
+        } else if (ov.option == "--out") {
+            out_path = ov.value.data(); // argv-backed, null-terminated
         }
+    }
+
+    ObjectStore store(conn);
+    if (store.Exists(kRsaKeyId)) {
+        ETLX_LOG_INFO("provision: key 0x%08x exists, erasing before regenerate",
+                      static_cast<unsigned>(kRsaKeyId));
+        auto er = store.Erase(kRsaKeyId);
+        if (!er) { ETLX_LOG_ERROR("provision: erase: %s", er.error().message.c_str()); return 1; }
     }
 
     auto key_res = RsaKey::Generate(conn, kRsaKeyId, bits, policy);
     if (!key_res) { ETLX_LOG_ERROR("provision: %s", key_res.error().message.c_str()); return 1; }
     auto csr_res = key_res.value().MakeCsr(subject_dn);
     if (!csr_res) { ETLX_LOG_ERROR("provision: CSR: %s", csr_res.error().message.c_str()); return 1; }
-    std::fputs(csr_res.value().c_str(), stdout);
+    const auto &csr = csr_res.value();
+    if (out_path) {
+        FILE *fp = std::fopen(out_path, "wb");
+        if (!fp) { ETLX_LOG_ERROR("provision: cannot open '%s' for writing", out_path); return 1; }
+        size_t n = std::fwrite(csr.c_str(), 1, csr.size(), fp);
+        bool ok = (n == csr.size());
+        if (std::fclose(fp) != 0) ok = false;
+        if (!ok) { ETLX_LOG_ERROR("provision: failed writing CSR to '%s'", out_path); return 1; }
+        ETLX_LOG_INFO("provision: CSR written to %s (%zu bytes)", out_path, csr.size());
+    } else {
+        std::fputs(csr.c_str(), stdout);
+    }
     return 0;
 }
 
@@ -224,7 +247,7 @@ int main(int argc, char **argv) {
     ports::host::FileWriter out; // stdout
 
     // Consume global --port flag before the command name.
-    const char *port = nullptr;
+    const char *port = "/dev/i2c-3";
     int argi = 1;
     while (argi < argc && std::strncmp(argv[argi], "--", 2) == 0) {
         if (std::strcmp(argv[argi], "--port") == 0 && argi + 1 < argc)
@@ -245,6 +268,15 @@ int main(int argc, char **argv) {
                        static_cast<int>(cmd_name.size()), cmd_name.data());
         conf::PrintCliHelp(App(), out);
         return 1;
+    }
+
+    // Per-command help ("<cmd> -h|--help") prints usage without touching the SE.
+    for (int j = argi; j < argc; ++j) {
+        const etl::string_view a{argv[j]};
+        if (a == "-h" || a == "--help") {
+            conf::PrintCliCommandHelp(App(), cmd_name, out);
+            return 0;
+        }
     }
 
     // rotate-scp03 opens its own ISD session (select_applet=false).
