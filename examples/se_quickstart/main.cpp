@@ -207,7 +207,8 @@ int RunRotateRoundtrip(const char *port) {
 int main(int argc, char **argv) {
     static ports::host::StderrLogSink sink;
     log::SetSink(&sink);
-    log::SetLevel(log::Level::Info);
+    // SE_DEBUG=1 raises etlx logging to Debug (e.g. PUT KEY P1/P2, object IDs).
+    log::SetLevel(std::getenv("SE_DEBUG") ? log::Level::Debug : log::Level::Info);
 
     // Port: argv[1], else EX_SSS_BOOT_SSS_PORT, else the on-device I2C default.
     const char *port = (argc > 1) ? argv[1] : std::getenv("EX_SSS_BOOT_SSS_PORT");
