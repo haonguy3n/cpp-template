@@ -113,12 +113,12 @@ int RunTour(const char *port) {
 
     // Inspect what kind of object now occupies the slot.
     if (auto t = store.GetType(kRsaKeyId))
-        std::printf("slot 0x%08x type: %s\n",
+        ETLX_LOG_INFO("slot 0x%08x type: %s",
                     static_cast<unsigned>(kRsaKeyId), TypeName(t.value()));
 
     // 5. CSR (PKCS#10) — private key stays in the SE; only the request leaves.
     if (auto csr = key.MakeCsr("CN=se-quickstart,O=Iritech")) {
-        std::printf("\n%s\n", csr.value().c_str());
+        ETLX_LOG_INFO("\n%s", csr.value().c_str());
     } else {
         ETLX_LOG_ERROR("csr: %s", csr.error().message.c_str());
         return 1;
@@ -137,7 +137,7 @@ int RunTour(const char *port) {
         ETLX_LOG_ERROR("verify: %s", ok.error().message.c_str());
         return 1;
     }
-    std::printf("signature self-check: %s\n", ok.value() ? "VALID" : "INVALID");
+    ETLX_LOG_INFO("signature self-check: %s", ok.value() ? "VALID" : "INVALID");
 
     // 7. Object store round-trip: write a small blob and read it back.
     const uint8_t info[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
@@ -146,7 +146,7 @@ int RunTour(const char *port) {
         return 1;
     }
     if (auto t = store.GetType(kDemoBlobId))
-        std::printf("slot 0x%08x type: %s\n",
+        ETLX_LOG_INFO("slot 0x%08x type: %s\n",
                     static_cast<unsigned>(kDemoBlobId), TypeName(t.value()));
     if (auto r = store.ReadBinary(kDemoBlobId)) {
         PrintHex("blob read-back", r.value().data(), r.value().size());
