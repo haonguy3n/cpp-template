@@ -14,6 +14,8 @@ extern "C" {
 
 namespace etlx::se {
 
+struct Scp03KeySet; // defined in scp03.hpp
+
 inline constexpr error::Category kSeCategory{"etlx::se"};
 
 enum SeError : int {
@@ -48,6 +50,13 @@ public:
     //   key rotation — the card manager must be reached without selecting
     //   the SE05x applet first.
     static Result<Connection> Open(const char *port, bool select_applet = true);
+
+    // Open authenticating with an explicit Platform SCP03 key set instead of the
+    // compiled-in defaults — needed to reconnect after a key rotation (the SE
+    // only accepts the new keys on the next session).  On the no-auth simulator
+    // build the key set is ignored.
+    static Result<Connection> Open(const char *port, const Scp03KeySet &keys,
+                                   bool select_applet = true);
 
     ~Connection();
 

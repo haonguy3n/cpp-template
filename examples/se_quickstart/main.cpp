@@ -10,15 +10,17 @@
 //   5. Build a PKCS#10 CSR for that key.
 //   6. Sign a 32-byte digest and verify it back (private key never leaves SE).
 //   7. Write a small device-info blob and read it back (ObjectStore).
+//   8. SCP03 key rotation round-trip: rotate to a hardcoded new key set and,
+//      on success, rotate back to the default keys (PlatformSCP03 builds only).
 //
 // Requires: ETLX_WITH_SE05X=ON (which implies ETLX_WITH_TLS=ON).
 //
-// Run against the NXP socket simulator or real hardware:
+// Run against real hardware or the NXP socket simulator:
+//   ./example_se_quickstart                       # defaults to /dev/i2c-3
+//   ./example_se_quickstart /dev/i2c-3            # port as argv[1]
 //   EX_SSS_BOOT_SSS_PORT=127.0.0.1:8050 ./example_se_quickstart
-//   ./example_se_quickstart 127.0.0.1:8050        # port as argv[1]
 //
-// If no port is given and EX_SSS_BOOT_SSS_PORT is unset, the example prints a
-// usage note and exits 0 (so it is safe to run in a no-hardware CI smoke test).
+// Port precedence: argv[1] > EX_SSS_BOOT_SSS_PORT > /dev/i2c-3.
 
 #include <etlx/se.hpp>
 #include <etlx/log/log.hpp>
@@ -27,6 +29,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+
+// SCP03 rotation only exists on the PlatformSCP03 (i2c) build; the no-auth
+// simulator build has no SCP03 static context to rotate.
+#if defined(SSS_HAVE_SE05X_AUTH_PLATFSCP03) && SSS_HAVE_SE05X_AUTH_PLATFSCP03
+#define ETLX_QS_HAVE_SCP03 1
+#else
+#define ETLX_QS_HAVE_SCP03 0
+#endif
 
 using namespace etlx;
 using namespace etlx::se;
@@ -54,21 +64,8 @@ const char *TypeName(ObjectType t) {
     }
 }
 
-} // namespace
-
-int main(int argc, char **argv) {
-    static ports::host::StderrLogSink sink;
-    log::SetSink(&sink);
-    log::SetLevel(log::Level::Info);
-
-    const char *port = (argc > 1) ? argv[1] : std::getenv("EX_SSS_BOOT_SSS_PORT");
-    if (port == nullptr) {
-        std::puts("se_quickstart: no SE port given.\n"
-                  "  usage: example_se_quickstart <port>\n"
-                  "  or set EX_SSS_BOOT_SSS_PORT (e.g. 127.0.0.1:8050)");
-        return 0;
-    }
-
+// Steps 1-7: the applet-session API tour. Returns 0 on success.
+int RunTour(const char *port) {
     // 1. Open the session. RAII: the SE is closed when `conn` goes out of scope.
     auto conn_res = Connection::Open(port);
     if (!conn_res) {
@@ -160,6 +157,73 @@ int main(int argc, char **argv) {
     // Leave the SE as we found it.
     if (auto e = store.Erase(kDemoBlobId); !e)
         ETLX_LOG_WARN("cleanup: %s", e.error().message.c_str());
+
+    return 0;
+}
+
+#if ETLX_QS_HAVE_SCP03
+// Demo key set to rotate TO. Distinct from the defaults; the demo restores the
+// defaults afterwards. (Demo only — never ship real SCP03 keys in source.)
+const Scp03KeySet kDemoNewKeys = {
+    {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F},
+    {0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F},
+    {0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F},
+};
+
+// One rotation in its OWN ISD session: authenticate with `auth` (the keys the SE
+// currently holds, whose DEK wraps the new keys), PUT KEY `target`, then close.
+// The SE05x drops the secure channel after rotating its own keys, so a second
+// PUT KEY in the same session is rejected (SW 0x6982) — each rotation must run
+// in a fresh session opened with the current keys.
+Status RotateOnce(const char *port, const Scp03KeySet &auth, const Scp03KeySet &target) {
+    auto conn_res = Connection::Open(port, auth, /*select_applet=*/false);
+    if (!conn_res) return Unexpected<>{conn_res.error()};
+    Scp03Admin admin(std::move(conn_res.value()));
+    return admin.Rotate(auth, target);
+}
+
+// 8. Round-trip: default -> new (one session), then new -> default (another).
+int RunRotateRoundtrip(const char *port) {
+    ETLX_LOG_INFO("rotate: default -> new");
+    if (auto st = RotateOnce(port, DefaultScp03Keys(), kDemoNewKeys); !st) {
+        ETLX_LOG_ERROR("rotate to new failed (SE keys unchanged): %s",
+                       st.error().message.c_str());
+        return 1;
+    }
+    ETLX_LOG_INFO("rotate: new -> default (restore, fresh session)");
+    if (auto st = RotateOnce(port, kDemoNewKeys, DefaultScp03Keys()); !st) {
+        ETLX_LOG_ERROR("rotate BACK FAILED — SE holds the NEW keys, "
+                       "reconnect with the demo keys to restore: %s",
+                       st.error().message.c_str());
+        return 1;
+    }
+    ETLX_LOG_INFO("rotate: round-trip OK — SE restored to default keys");
+    return 0;
+}
+#endif // ETLX_QS_HAVE_SCP03
+
+} // namespace
+
+int main(int argc, char **argv) {
+    static ports::host::StderrLogSink sink;
+    log::SetSink(&sink);
+    log::SetLevel(log::Level::Info);
+
+    // Port: argv[1], else EX_SSS_BOOT_SSS_PORT, else the on-device I2C default.
+    const char *port = (argc > 1) ? argv[1] : std::getenv("EX_SSS_BOOT_SSS_PORT");
+    if (port == nullptr)
+        port = "/dev/i2c-3";
+
+    if (int rc = RunTour(port); rc != 0)
+        return rc;
+
+#if ETLX_QS_HAVE_SCP03
+    if (int rc = RunRotateRoundtrip(port); rc != 0)
+        return rc;
+#else
+    std::puts("se_quickstart: SCP03 rotation needs the i2c (PlatformSCP03) "
+              "build; skipped on this transport.");
+#endif
 
     ETLX_LOG_INFO("se_quickstart: done");
     return 0;

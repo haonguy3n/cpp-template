@@ -17,9 +17,12 @@ static constexpr Scp03KeySet kDefaultKeys = {
     { 0xD8, 0x73, 0xF3, 0x16, 0xBE, 0x29, 0x7F, 0x2F, 0xC9, 0xC0, 0xE4, 0x5F, 0x54, 0x71, 0x06, 0x99 },
 };
 
+const Scp03KeySet &DefaultScp03Keys() { return kDefaultKeys; }
+
 #if SSS_HAVE_SE05X_AUTH_PLATFSCP03
 
-Result<Connection> Connection::Open(const char *port, bool select_applet) {
+Result<Connection> Connection::Open(const char *port, const Scp03KeySet &keys,
+                                    bool select_applet) {
     Connection c;
     auto *ctx = c.ctx_.get();
     auto *cc  = &ctx->se05x_open_ctx;
@@ -45,9 +48,9 @@ Result<Connection> Connection::Open(const char *port, bool select_applet) {
     }
 
     auto *sc = cc->auth.ctx.scp03.pStatic_ctx;
-    sss_host_key_store_set_key(&ctx->host_ks, &sc->Enc, kDefaultKeys.enc, 16, 128, NULL, 0);
-    sss_host_key_store_set_key(&ctx->host_ks, &sc->Mac, kDefaultKeys.mac, 16, 128, NULL, 0);
-    sss_host_key_store_set_key(&ctx->host_ks, &sc->Dek, kDefaultKeys.dek, 16, 128, NULL, 0);
+    sss_host_key_store_set_key(&ctx->host_ks, &sc->Enc, keys.enc, 16, 128, NULL, 0);
+    sss_host_key_store_set_key(&ctx->host_ks, &sc->Mac, keys.mac, 16, 128, NULL, 0);
+    sss_host_key_store_set_key(&ctx->host_ks, &sc->Dek, keys.dek, 16, 128, NULL, 0);
 
     st = sss_session_open(&ctx->session, kType_SSS_SE_SE05x, 0,
                           kSSS_ConnectionType_Encrypted, cc);
@@ -67,6 +70,10 @@ Result<Connection> Connection::Open(const char *port, bool select_applet) {
 
     ETLX_LOG_INFO("se: session opened (port=%s)", port ? port : "(default)");
     return c;
+}
+
+Result<Connection> Connection::Open(const char *port, bool select_applet) {
+    return Open(port, kDefaultKeys, select_applet);
 }
 
 #else // SSS_HAVE_SE05X_AUTH_NONE (sim transport - no SCP03)
@@ -94,6 +101,12 @@ Result<Connection> Connection::Open(const char *port, bool select_applet) {
 
     ETLX_LOG_INFO("se: session opened (port=%s)", port ? port : "(default)");
     return c;
+}
+
+// The simulator build has no SCP03 auth; the key set is ignored.
+Result<Connection> Connection::Open(const char *port, const Scp03KeySet &,
+                                    bool select_applet) {
+    return Open(port, select_applet);
 }
 
 #endif // SSS_HAVE_SE05X_AUTH_PLATFSCP03

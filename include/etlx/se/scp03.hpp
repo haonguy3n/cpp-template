@@ -13,6 +13,10 @@ struct Scp03KeySet {
     uint8_t dek[16];
 };
 
+// The compiled-in default Platform SCP03 key set that Connection::Open uses to
+// authenticate.  Exposed so callers can rotate away from / back to it.
+const Scp03KeySet &DefaultScp03Keys();
+
 // Key file: read/write the three 128-bit SCP03 keys from/to a text file.
 // Format (one key per line, space-separated tag + 32 lowercase hex digits):
 //   ENC 00112233...
@@ -48,6 +52,15 @@ public:
     // Install newKeys.  If key_file is non-null and dry_run is false, atomically
     // writes the new key set to the file on success.
     Status Rotate(const Scp03KeySet &new_keys, bool dry_run, const char *key_file = nullptr);
+
+    // File-free rotation for in-memory key sets (no key file read or written).
+    // current_keys supplies the DEK used to wrap new_keys and must match what
+    // the SE currently holds; new_keys is installed.  Because the current
+    // session stays valid after a PUT KEY, this may be called repeatedly on one
+    // Scp03Admin — e.g. rotate to fresh keys, confirm, then rotate back to the
+    // originals.
+    Status Rotate(const Scp03KeySet &current_keys, const Scp03KeySet &new_keys,
+                  bool dry_run = false);
 
     Scp03Admin(Scp03Admin &&) = default;
     ~Scp03Admin() = default;

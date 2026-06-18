@@ -18,6 +18,9 @@ extern "C" {
 #ifndef GP_INS_PUTKEY
 #define GP_INS_PUTKEY 0xD8
 #endif
+#ifndef GP_PUTKEY_KEYID
+#define GP_PUTKEY_KEYID 0x01 // key identifier of the first key in the PUT KEY block
+#endif
 #ifndef PUT_KEYS_KEY_TYPE_CODING_AES
 #define PUT_KEYS_KEY_TYPE_CODING_AES 0x88
 #endif
@@ -35,23 +38,29 @@ inline NXSCP03_StaticCtx_t *StaticCtx(Connection &conn) {
     return conn.boot_ctx()->se05x_open_ctx.auth.ctx.scp03.pStatic_ctx;
 }
 
-// Load the current DEK (read from the key file at path) into pStatic_ctx->Dek
-// so genKcvAndEncryptKey can wrap the new keys with it.
+// Load a DEK into pStatic_ctx->Dek so genKcvAndEncryptKey can wrap the new keys
+// with it.  The DEK must match what the SE currently holds.
+Status SetCurrentDek(Connection &conn, const uint8_t dek[kKeyLen]) {
+    NXSCP03_StaticCtx_t *sc = StaticCtx(conn);
+    sc->key_len = kKeyLen;
+    sss_status_t rc = sss_host_key_store_set_key(sc->Dek.keyStore, &sc->Dek, dek, kKeyLen,
+                                                  kKeyLen * 8, nullptr, 0);
+    if (rc != kStatus_SSS_Success)
+        return SeFail(kKeyFailed, "load current DEK into static ctx failed");
+    return Ok();
+}
+
+// Read the current DEK from the key file at path and load it (see SetCurrentDek).
 Status LoadCurrentDek(Connection &conn, const char *path) {
     uint8_t dek[kKeyLen] = {};
     auto st = scp03_keyfile::ReadDek(path, dek);
     if (!st)
         return st;
 
-    NXSCP03_StaticCtx_t *sc = StaticCtx(conn);
-    sc->key_len = kKeyLen;
-    sss_status_t rc = sss_host_key_store_set_key(sc->Dek.keyStore, &sc->Dek, dek, kKeyLen,
-                                                  kKeyLen * 8, nullptr, 0);
+    auto rc = SetCurrentDek(conn, dek);
     volatile uint8_t *vp = dek;
     for (int i = 0; i < kKeyLen; ++i) vp[i] = 0; // scrub
-    if (rc != kStatus_SSS_Success)
-        return SeFail(kKeyFailed, "load current DEK into static ctx failed");
-    return Ok();
+    return rc;
 }
 
 // KCV = AES-CBC(plainKey, IV=0, {0x01}*16)[0:3]
@@ -167,13 +176,17 @@ Status SendPutKey(Connection &conn, const Scp03KeySet &new_keys) {
         exp_len += CRYPTO_KEY_CHECK_LEN;
     }
 
+    // GP PUT KEY header. P1 = key version number being replaced. P2 = key
+    // identifier of the first key in the block (0x01) with b8 (0x80) set to mark
+    // a multi-key block. P2 is NOT the key version (that lives in P1) — using
+    // key_ver here yields SW 0x6A86 (incorrect P1/P2) on cards whose KVN != 1.
     auto *se_session = reinterpret_cast<sss_se05x_session_t *>(conn.session());
-    const tlvHeader_t hdr = {{GP_CLA_BYTE, GP_INS_PUTKEY, key_ver,
-                              static_cast<uint8_t>(key_ver | 0x80u)}};
+    const uint8_t p2 = static_cast<uint8_t>(0x80u | GP_PUTKEY_KEYID);
+    const tlvHeader_t hdr = {{GP_CLA_BYTE, GP_INS_PUTKEY, key_ver, p2}};
     uint8_t rsp[64] = {};
     size_t rsp_len = sizeof(rsp);
 
-    ETLX_LOG_DEBUG("se: sending PUT KEY (%zu bytes) over SCP03", len);
+    ETLX_LOG_DEBUG("se: PUT KEY P1(KVN)=0x%02x P2=0x%02x len=%zu", key_ver, p2, len);
     smStatus_t txr = DoAPDUTxRx_s_Case4(&se_session->s_ctx, &hdr, cmd, len, rsp, &rsp_len);
     if (txr != SM_OK) {
         ETLX_LOG_ERROR("se: PUT KEY transport failed (SW=0x%04x)", static_cast<unsigned>(txr));
@@ -224,6 +237,17 @@ Status Scp03Admin::Rotate(const Scp03KeySet &new_keys, bool dry_run, const char 
         }
     }
     return Ok();
+}
+
+Status Scp03Admin::Rotate(const Scp03KeySet &current_keys, const Scp03KeySet &new_keys,
+                          bool dry_run) {
+    if (auto st = SetCurrentDek(conn_, current_keys.dek); !st)
+        return st;
+    if (dry_run) {
+        ETLX_LOG_INFO("se: SCP03 rotate dry-run (in-memory): key blocks built, not sent");
+        return Ok();
+    }
+    return SendPutKey(conn_, new_keys);
 }
 
 } // namespace etlx::se
