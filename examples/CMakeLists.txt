@@ -39,4 +39,10 @@ if(ETLX_WITH_SE05X)
   target_include_directories(example_se_mtls_client PRIVATE ${CMAKE_SOURCE_DIR})
   target_link_libraries(example_se_mtls_client
     PRIVATE etlx::se05x etlx::tls etlx::transport etlx::host etlx_embedded_flags)
+
+  # Quickstart tour of the SE support API via the single <etlx/se.hpp> header.
+  add_executable(example_se_quickstart se_quickstart/main.cpp)
+  target_include_directories(example_se_quickstart PRIVATE ${CMAKE_SOURCE_DIR})
+  target_link_libraries(example_se_quickstart
+    PRIVATE etlx::se05x etlx::host etlx_embedded_flags)
 endif()

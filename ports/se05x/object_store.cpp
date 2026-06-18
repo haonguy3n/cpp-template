@@ -32,6 +32,48 @@ bool ObjectStore::Exists(uint32_t id) {
     return found;
 }
 
+Result<ObjectType> ObjectStore::GetType(uint32_t id) {
+    KeyObject obj(conn_);
+    if (auto st = obj.Open(id); !st)
+        return SeFail(kReadFailed, "object not found");
+
+    // get_handle (inside Open) fills cipherType from the SE object attributes.
+    ObjectType type;
+    switch (obj.raw()->cipherType) {
+    case kSSS_CipherType_RSA:
+    case kSSS_CipherType_RSA_CRT:
+        type = ObjectType::Rsa;
+        break;
+    case kSSS_CipherType_EC_NIST_P:
+    case kSSS_CipherType_EC_NIST_K:
+    case kSSS_CipherType_EC_MONTGOMERY:
+    case kSSS_CipherType_EC_TWISTED_ED:
+    case kSSS_CipherType_EC_BRAINPOOL:
+        type = ObjectType::Ecc;
+        break;
+    case kSSS_CipherType_AES:
+    case kSSS_CipherType_DES:
+    case kSSS_CipherType_HMAC:
+    case kSSS_CipherType_CMAC:
+        type = ObjectType::Symmetric;
+        break;
+    case kSSS_CipherType_Certificate:
+        type = ObjectType::Certificate;
+        break;
+    case kSSS_CipherType_Binary:
+        type = ObjectType::Binary;
+        break;
+    default:
+        type = ObjectType::Other;
+        break;
+    }
+    ETLX_LOG_DEBUG("se: type id=0x%08x cipherType=%u -> %d",
+                   static_cast<unsigned>(id),
+                   static_cast<unsigned>(obj.raw()->cipherType),
+                   static_cast<int>(type));
+    return type;
+}
+
 Status ObjectStore::Erase(uint32_t id) {
     ETLX_LOG_DEBUG("se: erase id=0x%08x", static_cast<unsigned>(id));
     KeyObject obj(conn_);

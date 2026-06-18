@@ -14,6 +14,15 @@ constexpr uint32_t kRsaKeyId     = 0xFE000001u;
 constexpr uint32_t kRsaCertId    = 0xFE000002u;
 constexpr uint32_t kDeviceInfoId = 0xFE000010u;
 
+enum class ObjectType {
+    Binary,      // raw binary blob
+    Certificate, // X.509 certificate object
+    Rsa,         // RSA key (RAW or CRT)
+    Ecc,         // any EC curve family (NIST, Montgomery, Edwards, Brainpool)
+    Symmetric,   // AES / DES / HMAC / CMAC
+    Other,       // anything else the SE reports
+};
+
 // Object-store operations (cert/blob read-write) and management helpers.
 // These use sss_key_store_set_key/get_key with kSSS_CipherType_Binary.
 class ObjectStore {
@@ -29,6 +38,10 @@ public:
 
     // True if a persisted object with the given ID exists.
     bool Exists(uint32_t id);
+
+    // Report what kind of object occupies a slot (binary / cert / RSA / ECC /
+    // symmetric). Returns an error if the slot is empty.
+    Result<ObjectType> GetType(uint32_t id);
 
     // Erase a persisted object. No-op if not present; returns error on failure.
     Status Erase(uint32_t id);
