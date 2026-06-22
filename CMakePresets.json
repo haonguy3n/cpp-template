@@ -75,6 +75,20 @@
       "displayName": "Cross aarch64 build, Boost.Asio transport",
       "inherits": "aarch64",
       "cacheVariables": { "ETLX_TRANSPORT": "asio" }
+    },
+    {
+      "name": "sigmastar",
+      "displayName": "Cross build for SigmaStar 26T Pro (armv7) — SE05x i2c lib",
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/sigmastar-arm-linux-gnueabihf.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ETLX_WITH_SE05X": "ON",
+        "ETLX_SE05X_TRANSPORT": "i2c",
+        "ETLX_BUILD_TESTS": "OFF",
+        "ETLX_BUILD_EXAMPLES": "OFF",
+        "ETLX_BUILD_DEMOCLI": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -85,7 +99,8 @@
     { "name": "aarch64-asio",  "configurePreset": "aarch64-asio" },
     { "name": "se05x-socket",  "configurePreset": "se05x-socket" },
     { "name": "se05x-i2c",     "configurePreset": "se05x-i2c" },
-    { "name": "se05x-sim",     "configurePreset": "se05x-sim" }
+    { "name": "se05x-sim",     "configurePreset": "se05x-sim" },
+    { "name": "sigmastar",     "configurePreset": "sigmastar" }
   ],
   "testPresets": [
     {

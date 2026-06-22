@@ -7,8 +7,8 @@
 //   2. Read the 18-byte chip UID.
 //   3. Pull random bytes from the SE hardware TRNG (SeRandom).
 //   4. Provision an RSA key (generate, or open an existing one).
-//   5. Build a PKCS#10 CSR for that key.
-//   6. Sign a 32-byte digest and verify it back (private key never leaves SE).
+//   5-6. For the RSA key and an EC P-256 key: report the slot type, build a
+//      PKCS#10 CSR, sign a 32-byte digest and verify it (key never leaves SE).
 //   7. Write a small device-info blob and read it back (ObjectStore).
 //   8. SCP03 key rotation round-trip: rotate to a hardcoded new key set and,
 //      on success, rotate back to the default keys (PlatformSCP03 builds only).
@@ -64,6 +64,38 @@ const char *TypeName(ObjectType t) {
     }
 }
 
+// Common per-key exercise: report the slot type, build a CSR, sign a digest and
+// verify it back. Works for any key with Sign/Verify/MakeCsr (RsaKey, EcKey).
+template <class Key>
+int ExerciseAsymKey(ObjectStore &store, Key &key, uint32_t slot,
+                    const char *subject, const uint8_t *digest, size_t digest_len) {
+    if (auto t = store.GetType(slot))
+        ETLX_LOG_INFO("slot 0x%08x type: %s", static_cast<unsigned>(slot), TypeName(t.value()));
+
+    // CSR (PKCS#10) — private key stays in the SE; only the request leaves.
+    if (auto csr = key.MakeCsr(subject)) {
+        ETLX_LOG_INFO("\n%s", csr.value().c_str());
+    } else {
+        ETLX_LOG_ERROR("csr: %s", csr.error().message.c_str());
+        return 1;
+    }
+
+    auto sig = key.Sign(digest, digest_len);
+    if (!sig) {
+        ETLX_LOG_ERROR("sign: %s", sig.error().message.c_str());
+        return 1;
+    }
+    ETLX_LOG_INFO("signature %zu bytes", sig.value().size());
+
+    auto ok = key.Verify(digest, digest_len, sig.value().data(), sig.value().size());
+    if (!ok) {
+        ETLX_LOG_ERROR("verify: %s", ok.error().message.c_str());
+        return 1;
+    }
+    ETLX_LOG_INFO("signature self-check: %s", ok.value() ? "VALID" : "INVALID");
+    return 0;
+}
+
 // Steps 1-7: the applet-session API tour. Returns 0 on success.
 int RunTour(const char *port) {
     // 1. Open the session. RAII: the SE is closed when `conn` goes out of scope.
@@ -109,35 +141,33 @@ int RunTour(const char *port) {
         ETLX_LOG_ERROR("key: %s", key_res.error().message.c_str());
         return 1;
     }
-    RsaKey &key = key_res.value();
+    RsaKey &rsa = key_res.value();
 
-    // Inspect what kind of object now occupies the slot.
-    if (auto t = store.GetType(kRsaKeyId))
-        ETLX_LOG_INFO("slot 0x%08x type: %s",
-                    static_cast<unsigned>(kRsaKeyId), TypeName(t.value()));
+    // 5-6. RSA: slot , CSR, sign + verify.
+    ETLX_LOG_INFO("se_typequickstart: --- RSA key 0x%08x ---", static_cast<unsigned>(kRsaKeyId));
+    if (int rc = ExerciseAsymKey(store, rsa, kRsaKeyId, "CN=se-quickstart-rsa,O=Iritech",
+                                 nonce, sizeof(nonce)); rc != 0)
+        return rc;
 
-    // 5. CSR (PKCS#10) — private key stays in the SE; only the request leaves.
-    if (auto csr = key.MakeCsr("CN=se-quickstart,O=Iritech")) {
-        ETLX_LOG_INFO("\n%s", csr.value().c_str());
+    // 6b. EC (NIST P-256): same flow with an ECDSA key.
+    ETLX_LOG_INFO("se_quickstart: --- EC key 0x%08x ---", static_cast<unsigned>(kEcKeyId));
+    Result<EcKey> ec_res = SeFail(kKeyFailed, "uninitialised");
+    if (store.Exists(kEcKeyId)) {
+        ETLX_LOG_INFO("se_quickstart: opening existing EC key 0x%08x",
+                      static_cast<unsigned>(kEcKeyId));
+        ec_res = EcKey::Open(conn, kEcKeyId);
     } else {
-        ETLX_LOG_ERROR("csr: %s", csr.error().message.c_str());
+        ETLX_LOG_INFO("se_quickstart: generating EC P-256 key 0x%08x",
+                      static_cast<unsigned>(kEcKeyId));
+        ec_res = EcKey::Generate(conn, kEcKeyId, EcCurve::P256, KeyPolicy::Full);
+    }
+    if (!ec_res) {
+        ETLX_LOG_ERROR("ec key: %s", ec_res.error().message.c_str());
         return 1;
     }
-
-    // 6. Sign the 32-byte nonce as if it were a SHA-256 digest, then verify.
-    auto sig = key.Sign(nonce, sizeof(nonce));
-    if (!sig) {
-        ETLX_LOG_ERROR("sign: %s", sig.error().message.c_str());
-        return 1;
-    }
-    ETLX_LOG_INFO("se_quickstart: signature %zu bytes", sig.value().size());
-
-    auto ok = key.Verify(nonce, sizeof(nonce), sig.value().data(), sig.value().size());
-    if (!ok) {
-        ETLX_LOG_ERROR("verify: %s", ok.error().message.c_str());
-        return 1;
-    }
-    ETLX_LOG_INFO("signature self-check: %s", ok.value() ? "VALID" : "INVALID");
+    if (int rc = ExerciseAsymKey(store, ec_res.value(), kEcKeyId, "CN=se-quickstart-ec,O=Iritech",
+                                 nonce, sizeof(nonce)); rc != 0)
+        return rc;
 
     // 7. Object store round-trip: write a small blob and read it back.
     const uint8_t info[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};

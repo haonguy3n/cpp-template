@@ -12,6 +12,8 @@ namespace etlx::se {
 // Default SE05x object IDs (matching the se051 project layout).
 constexpr uint32_t kRsaKeyId     = 0xFE000001u;
 constexpr uint32_t kRsaCertId    = 0xFE000002u;
+constexpr uint32_t kEcKeyId      = 0xFE000003u;
+constexpr uint32_t kEcCertId     = 0xFE000004u;
 constexpr uint32_t kDeviceInfoId = 0xFE000010u;
 
 enum class ObjectType {

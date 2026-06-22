@@ -63,10 +63,11 @@ target_compile_options(etlx_flags INTERFACE
   $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
 )
 
-if(ETLX_TARGET_AARCH64)
-  message(STATUS "etlx: cross-compiling for aarch64-linux-gnu")
+if(CMAKE_CROSSCOMPILING)
+  message(STATUS "etlx: cross-compiling for ${CMAKE_SYSTEM_PROCESSOR} "
+                 "(${CMAKE_CXX_COMPILER})")
 else()
-  message(STATUS "etlx: building for native host")
+  message(STATUS "etlx: building for native host (${CMAKE_SYSTEM_PROCESSOR})")
 endif()
 
 # A second interface target carrying the strict embedded flags. Library/app

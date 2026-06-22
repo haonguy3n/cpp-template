@@ -143,6 +143,8 @@ add_library(etlx_se05x STATIC
   se_connection.cpp
   se_random.cpp
   rsa_key.cpp
+  ec_key.cpp
+  csr_build.cpp
   object_store.cpp
   scp03.cpp
   scp03_keyfile.cpp
@@ -151,3 +153,41 @@ add_library(etlx_se05x STATIC
 add_library(etlx::se05x ALIAS etlx_se05x)
 target_include_directories(etlx_se05x PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(etlx_se05x PUBLIC etlx::etlx etlx::host etlx_simw)
+
+# --- Downstream consumption helpers -----------------------------------------
+# A CMake consumer just links `etlx::se05x` and gets etlx_simw + etlx + host +
+# mbedTLS transitively, in the right order. But non-CMake consumers (e.g.
+# dev-sentinel's legacy Makefile.proj build of sentinel-service) link by path
+# and would otherwise have to dig the six archives out of the FetchContent
+# `_deps/` tree and wrap them in `-Wl,--start-group`. The combined archive +
+# install rules below give them ONE static library at a stable path.
+
+# Merge the full SE link set into a single self-contained archive using an `ar`
+# MRI script (portable across the vendor cross-`ar`). Order inside the archive
+# doesn't matter — `ar` resolves an archive's own members as a set.
+set(_se_combined "${CMAKE_CURRENT_BINARY_DIR}/libetlx_se05x_combined.a")
+set(_se_mri      "${CMAKE_CURRENT_BINARY_DIR}/etlx_se05x_combined.mri")
+file(GENERATE OUTPUT "${_se_mri}" CONTENT
+"create ${_se_combined}
+addlib $<TARGET_FILE:etlx_se05x>
+addlib $<TARGET_FILE:etlx_simw>
+addlib $<TARGET_FILE:etlx>
+addlib $<TARGET_FILE:etlx_host>
+addlib $<TARGET_FILE:mbedx509>
+addlib $<TARGET_FILE:mbedcrypto>
+save
+end
+")
+add_custom_command(
+  OUTPUT "${_se_combined}"
+  COMMAND ${CMAKE_AR} -M < "${_se_mri}"
+  DEPENDS etlx_se05x etlx_simw etlx etlx_host mbedx509 mbedcrypto "${_se_mri}"
+  COMMENT "Merging etlx SE05x + SSS + mbedTLS into one static archive"
+  VERBATIM)
+add_custom_target(etlx_se05x_combined ALL DEPENDS "${_se_combined}")
+
+# `cmake --install <build> --prefix <staging>` stages the headers + the combined
+# archive so the dev-sentinel module can reference stable paths:
+#   <staging>/lib/libetlx_se05x_combined.a   and   <staging>/include/etlx/...
+install(FILES "${_se_combined}" DESTINATION lib)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/etlx DESTINATION include)

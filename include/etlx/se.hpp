@@ -23,6 +23,7 @@
 //   RsaKey       — generate/open an SE-resident RSA key; sign, verify,
 //                  export SPKI, build a PKCS#10 CSR (private key never leaves
 //                  the chip).
+//   EcKey        — same surface for NIST-P EC keys (ECDSA sign/verify, CSR).
 //   SeRandom     — etlx::crypto::Random backed by the SE hardware TRNG.
 //   Scp03Admin   — Platform SCP03 static-key rotation (GP PUT KEY).
 //   SetupOpaquePk— bridge an SE key into an mbedTLS pk context for mTLS.
@@ -35,5 +36,6 @@
 #include <etlx/se/object_store.hpp> // ObjectStore + default object IDs
 #include <etlx/se/random.hpp>       // SeRandom
 #include <etlx/se/rsa_key.hpp>      // RsaKey, RsaBits, KeyPolicy
+#include <etlx/se/ec_key.hpp>       // EcKey, EcCurve
 #include <etlx/se/scp03.hpp>        // Scp03Admin, Scp03KeySet, scp03_keyfile
 #include <etlx/se/se_pk.hpp>        // SetupOpaquePk (mbedTLS bridge for mTLS)
