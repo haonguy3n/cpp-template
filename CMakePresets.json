@@ -3,145 +3,21 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
   "configurePresets": [
     {
-      "name": "base",
-      "hidden": true,
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-      }
-    },
-    {
       "name": "native",
-      "displayName": "Native (host) build",
-      "inherits": "base",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/host.cmake",
+      "displayName": "Native host build",
+      "binaryDir": "${sourceDir}/build/native",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
-      "name": "native-asan",
-      "displayName": "Native build with AddressSanitizer",
-      "inherits": "native",
-      "cacheVariables": {
-        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer",
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
-    },
-    {
-      "name": "aarch64",
-      "displayName": "Cross build for aarch64-linux-gnu",
-      "inherits": "base",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/aarch64-linux-gnu.cmake",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
-    },
-    {
-      "name": "native-asio",
-      "displayName": "Native build, Boost.Asio transport",
-      "inherits": "native",
-      "cacheVariables": { "ETLX_TRANSPORT": "asio" }
-    },
-    {
-      "name": "se05x-socket",
-      "displayName": "SE05x build — JRCP socket/simulator transport",
-      "inherits": "native",
-      "cacheVariables": {
-        "ETLX_WITH_SE05X": "ON",
-        "ETLX_SE05X_TRANSPORT": "socket",
-        "ETLX_BUILD_TESTS": "ON"
-      }
-    },
-    {
-      "name": "se05x-i2c",
-      "displayName": "SE05x build — direct I2C hardware transport",
-      "inherits": "native",
-      "cacheVariables": {
-        "ETLX_WITH_SE05X": "ON",
-        "ETLX_SE05X_TRANSPORT": "i2c",
-        "ETLX_BUILD_TESTS": "ON"
-      }
-    },
-    {
-      "name": "se05x-sim",
-      "displayName": "SE05x build — wolfSSL software simulator (T1oI2C over TCP)",
-      "inherits": "native",
-      "cacheVariables": {
-        "ETLX_WITH_SE05X": "ON",
-        "ETLX_SE05X_TRANSPORT": "sim",
-        "ETLX_BUILD_TESTS": "ON"
-      }
-    },
-    {
-      "name": "aarch64-asio",
-      "displayName": "Cross aarch64 build, Boost.Asio transport",
-      "inherits": "aarch64",
-      "cacheVariables": { "ETLX_TRANSPORT": "asio" }
-    },
-    {
       "name": "sigmastar",
-      "displayName": "Cross build for SigmaStar 26T Pro (armv7) — SE05x i2c lib",
-      "inherits": "base",
+      "displayName": "SigmaStar 26T-Pro (armhf, gcc-11)",
+      "binaryDir": "${sourceDir}/build/sigmastar",
       "toolchainFile": "${sourceDir}/cmake/toolchains/sigmastar-arm-linux-gnueabihf.cmake",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "ETLX_WITH_SE05X": "ON",
-        "ETLX_SE05X_TRANSPORT": "i2c",
-        "ETLX_BUILD_TESTS": "OFF",
-        "ETLX_BUILD_EXAMPLES": "OFF",
-        "ETLX_BUILD_DEMOCLI": "OFF"
-      }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     }
   ],
   "buildPresets": [
-    { "name": "native",        "configurePreset": "native" },
-    { "name": "native-asan",   "configurePreset": "native-asan" },
-    { "name": "native-asio",   "configurePreset": "native-asio" },
-    { "name": "aarch64",       "configurePreset": "aarch64" },
-    { "name": "aarch64-asio",  "configurePreset": "aarch64-asio" },
-    { "name": "se05x-socket",  "configurePreset": "se05x-socket" },
-    { "name": "se05x-i2c",     "configurePreset": "se05x-i2c" },
-    { "name": "se05x-sim",     "configurePreset": "se05x-sim" },
-    { "name": "sigmastar",     "configurePreset": "sigmastar" }
-  ],
-  "testPresets": [
-    {
-      "name": "native",
-      "configurePreset": "native",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "native-asan",
-      "configurePreset": "native-asan",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "native-asio",
-      "configurePreset": "native-asio",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "aarch64",
-      "configurePreset": "aarch64",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "aarch64-asio",
-      "configurePreset": "aarch64-asio",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "se05x-socket",
-      "configurePreset": "se05x-socket",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "se05x-i2c",
-      "configurePreset": "se05x-i2c",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "se05x-sim",
-      "configurePreset": "se05x-sim",
-      "output": { "outputOnFailure": true }
-    }
+    { "name": "native",    "configurePreset": "native" },
+    { "name": "sigmastar", "configurePreset": "sigmastar" }
   ]
 }

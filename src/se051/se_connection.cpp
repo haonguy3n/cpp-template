@@ -1,0 +1,77 @@
+#include <se051/connection.hpp>
+#include <se051/scp03.hpp>
+#include <se051/log/log.hpp>
+
+extern "C" {
+#include <ex_sss_boot.h>
+#include <fsl_sss_api.h>
+#include <fsl_sss_se05x_types.h>
+}
+
+namespace se051 {
+
+// SE051C part SSS_PFSCP_ENABLE_SE051C_0005A8FA.
+static constexpr Scp03KeySet kDefaultKeys = {
+    { 0xBF, 0xC2, 0xDB, 0xE1, 0x82, 0x8E, 0x03, 0x5D, 0x3E, 0x7F, 0xA3, 0x6B, 0x90, 0x2A, 0x05, 0xC6 },
+    { 0xBE, 0xF8, 0x5B, 0xD7, 0xBA, 0x04, 0x97, 0xD6, 0x28, 0x78, 0x1C, 0xE4, 0x7B, 0x18, 0x8C, 0x96 },
+    { 0xD8, 0x73, 0xF3, 0x16, 0xBE, 0x29, 0x7F, 0x2F, 0xC9, 0xC0, 0xE4, 0x5F, 0x54, 0x71, 0x06, 0x99 },
+};
+
+const Scp03KeySet &DefaultScp03Keys() { return kDefaultKeys; }
+
+Result<Connection> Connection::Open(const char *port, const Scp03KeySet &keys,
+                                    bool select_applet) {
+    Connection c;
+    auto *ctx = c.ctx_.get();
+    auto *cc  = &ctx->se05x_open_ctx;
+
+    if (!select_applet)
+        cc->skip_select_applet = 1;
+
+    cc->connType = kType_SE_Conn_Type_T1oI2C;
+    cc->portName = port;
+
+    sss_status_t st = ex_sss_se05x_prepare_host(
+        &ctx->host_session, &ctx->host_ks, cc, &ctx->ex_se05x_auth, kSSS_AuthType_SCP03);
+    if (st != kStatus_SSS_Success) {
+        SE051_LOG_ERROR("se: prepare_host failed (status=0x%04x)", static_cast<unsigned>(st));
+        return SeFail(kOpenFailed, "prepare_host failed");
+    }
+
+    auto *sc = cc->auth.ctx.scp03.pStatic_ctx;
+    sss_host_key_store_set_key(&ctx->host_ks, &sc->Enc, keys.enc, 16, 128, NULL, 0);
+    sss_host_key_store_set_key(&ctx->host_ks, &sc->Mac, keys.mac, 16, 128, NULL, 0);
+    sss_host_key_store_set_key(&ctx->host_ks, &sc->Dek, keys.dek, 16, 128, NULL, 0);
+
+    st = sss_session_open(&ctx->session, kType_SSS_SE_SE05x, 0,
+                          kSSS_ConnectionType_Encrypted, cc);
+    if (st != kStatus_SSS_Success) {
+        SE051_LOG_ERROR("se: sss_session_open failed (port=%s, status=0x%04x)",
+                       port ? port : "(default)", static_cast<unsigned>(st));
+        return SeFail(kOpenFailed, "sss_session_open failed");
+    }
+    c.opened_ = true;
+
+    st = ex_sss_key_store_and_object_init(ctx);
+    if (st != kStatus_SSS_Success) {
+        SE051_LOG_ERROR("se: key_store_and_object_init failed (status=0x%04x)",
+                       static_cast<unsigned>(st));
+        return SeFail(kStoreFailed, "ex_sss_key_store_and_object_init failed");
+    }
+
+    SE051_LOG_INFO("se: session opened (port=%s)", port ? port : "(default)");
+    return c;
+}
+
+Result<Connection> Connection::Open(const char *port, bool select_applet) {
+    return Open(port, kDefaultKeys, select_applet);
+}
+
+Connection::~Connection() {
+    if (opened_) {
+        ex_sss_session_close(ctx_.get());
+        SE051_LOG_DEBUG("se: session closed");
+    }
+}
+
+} // namespace se051
